@@ -109,7 +109,7 @@ void loop() {
   pBLEScan->setInterval(100);
   pBLEScan->setWindow(99);
 
-  const int SCAN_SECONDS = 5;
+  const int SCAN_SECONDS = 1;  // shorter scans for faster reaction
   BLEScanResults foundDevices = pBLEScan->start(SCAN_SECONDS, false);
 
   int count = foundDevices.getCount();
@@ -139,5 +139,5 @@ void loop() {
   }
 
   pBLEScan->clearResults();  // Free memory
-  delay(2000);
+  delay(100);  // brief pause before rescanning
 }

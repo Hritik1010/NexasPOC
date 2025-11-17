@@ -1,30 +1,26 @@
 // server.js
 
 const express = require("express");
-const app = express();
+const { kv } = require("@vercel/kv");
+
 const PORT = process.env.PORT || 80;
+const KV_KEY = process.env.KV_KEY || "esp32-distance";
+const useKV = Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 
-// Allow JSON data from ESP32
-app.use(express.json());
-
-// Store distances here
-let espData = {
+const DEFAULT_ESP_DATA = {
   "ESP32-A": "No data",
   "ESP32-B": "No data",
-  "ESP32-C": "No data"
+  "ESP32-C": "No data",
 };
 
-// Endpoint for ESP32 to send data
-app.post("/update", (req, res) => {
-  const { id, distance } = req.body;
-  if (id && espData.hasOwnProperty(id)) {
-    espData[id] = distance !== -1 ? `${distance} m` : "Not Found";
-    console.log(`[${new Date().toISOString()}] from ${req.ip} -> [${id}] Distance: ${espData[id]}`);
-    res.status(200).send("Data received");
-  } else {
-    res.status(400).send("Invalid ID or data");
-  }
-});
+const LOCATION_LABELS = {
+  "ESP32-A": "Shop 1",
+  "ESP32-B": "Shop 2",
+  "ESP32-C": "Shop 3",
+};
+
+const espData = { ...DEFAULT_ESP_DATA };
+const sseClients = new Set();
 
 const parseDistanceMeters = (value) => {
   if (!value || value === "No data" || value === "Not Found") return null;
@@ -32,10 +28,8 @@ const parseDistanceMeters = (value) => {
   return Number.isFinite(numeric) ? numeric : null;
 };
 
-// Webpage to display distances
-app.get("/", (req, res) => {
-  const entries = Object.entries(espData);
-  const closest = entries.reduce((best, [id, label]) => {
+const findClosest = (entries) => {
+  return entries.reduce((best, [id, label]) => {
     const meters = parseDistanceMeters(label);
     if (meters === null) return best;
     if (!best || meters < best.distance) {
@@ -43,6 +37,58 @@ app.get("/", (req, res) => {
     }
     return best;
   }, null);
+};
+
+const statusForDevice = (id, label, closest) => {
+  const location = LOCATION_LABELS[id] || id;
+  const meters = parseDistanceMeters(label);
+  if (!closest || !meters) {
+    return "-";
+  }
+  if (closest.id === id) {
+    return `You are near ${location}`;
+  }
+  return "-";
+};
+
+const readStoreSnapshot = async () => {
+  if (useKV) {
+    const remote = await kv.hgetall(KV_KEY);
+    return { ...DEFAULT_ESP_DATA, ...(remote || {}) };
+  }
+  return { ...espData };
+};
+
+const writeStoreValue = async (id, value) => {
+  espData[id] = value;
+  if (useKV) {
+    await kv.hset(KV_KEY, { [id]: value });
+  }
+};
+
+const buildStatusRows = async () => {
+  const snapshot = await readStoreSnapshot();
+  const entries = Object.entries(snapshot);
+  const closest = findClosest(entries);
+  return entries.map(([id, distance]) => {
+    const isClosest = closest && closest.id === id;
+    const location = LOCATION_LABELS[id] || id;
+    const status = statusForDevice(id, distance, closest);
+    return { id, location, status, highlight: Boolean(isClosest) };
+  });
+};
+
+const renderRowsHtml = (rows) => {
+  return rows
+    .map(
+      ({ id, location, status, highlight }) =>
+        `<tr class="${highlight ? "highlight" : ""}"><td><span class="location">${location}</span><div>${id}</div></td><td class="status">${status}</td></tr>`
+    )
+    .join("");
+};
+
+const renderDashboard = async () => {
+  const rows = await buildStatusRows();
 
   let html = `
     <style>
@@ -59,20 +105,14 @@ app.get("/", (req, res) => {
       h2 {
         margin: 0 0 16px;
       }
-      .layout {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 24px;
-        align-items: stretch;
-      }
       .card {
         background: rgba(15, 23, 42, 0.85);
         border: 1px solid rgba(148, 163, 184, 0.2);
         border-radius: 16px;
         padding: 20px;
         box-shadow: 0 20px 60px rgba(2, 6, 23, 0.7);
-        min-width: 320px;
-        flex: 1 1 320px;
+        max-width: 720px;
+        margin: 0 auto;
       }
       table {
         width: 100%;
@@ -93,74 +133,147 @@ app.get("/", (req, res) => {
         border-bottom: none;
       }
       tr.highlight td {
-        background: rgba(56, 189, 248, 0.08);
-        border-color: rgba(56, 189, 248, 0.4);
+        background: rgba(34, 197, 94, 0.08);
+        border-color: rgba(34, 197, 94, 0.4);
       }
-      .closest-chip {
-        display: inline-flex;
-        align-items: center;
-        gap: 8px;
-        padding: 6px 14px;
-        border-radius: 999px;
-        background: #38bdf8;
-        color: #0f172a;
-        font-weight: 600;
-        letter-spacing: 0.08em;
+      .location {
+        display: block;
+        font-size: 12px;
+        letter-spacing: 0.2em;
         text-transform: uppercase;
+        color: #94a3b8;
       }
-      .closest-distance {
-        font-size: 42px;
-        font-weight: 700;
-        margin: 20px 0 8px;
-      }
-      .no-data {
-        color: #fbbf24;
+      .status {
         font-weight: 600;
+        color: #e2e8f0;
       }
     </style>
-    <div class="layout">
-      <div class="card">
-        <h2>📡 ESP32 BLE Distance Monitor</h2>
-        <table>
-          <tr><th>ESP32 ID</th><th>Distance</th></tr>`;
-
-  for (const [id, distance] of entries) {
-    const isClosest = closest && closest.id === id;
-    html += `<tr class="${isClosest ? "highlight" : ""}"><td>${id}</td><td>${distance}</td></tr>`;
-  }
-
-  html += `
-        </table>
-      </div>
-      <div class="card" style="max-width: 360px;">
-        <div class="closest-chip">Closest Device</div>
-        <div style="margin-top:16px;">
-  `;
-
-  if (closest) {
-    html += `
-          <h3 style="margin:0; font-size: 20px; color:#bae6fd;">${closest.id}</h3>
-          <div class="closest-distance">${closest.distance.toFixed(2)} m</div>
-          <p style="margin:0; color:#94a3b8;">This is currently the nearest ESP32 to the target UUID.</p>
-    `;
-  } else {
-    html += `
-          <p class="no-data">Waiting for valid readings...</p>
-          <p style="color:#94a3b8;">Once an ESP32 detects the target, the closest device will appear here.</p>
-    `;
-  }
-
-  html += `
-        </div>
-      </div>
+    <div class="card">
+      <h2>🛰️ Room Proximity Status Monitor</h2>
+      <table>
+        <thead>
+          <tr><th>Location</th><th>Status</th></tr>
+        </thead>
+        <tbody id="status-body">
+          ${renderRowsHtml(rows)}
+        </tbody>
+      </table>
     </div>
+    <script>
+      const renderRows = (rows) => rows.map(row =>
+        '<tr class="' + (row.highlight ? 'highlight' : '') + '"><td><span class="location">' +
+        row.location + '</span><div>' + row.id + '</div></td><td class="status">' + row.status + '</td></tr>'
+      ).join('');
+
+      const applyRows = (rows) => {
+        const body = document.getElementById('status-body');
+        if (body && Array.isArray(rows)) {
+          body.innerHTML = renderRows(rows);
+        }
+      };
+
+      function startStream() {
+        const source = new EventSource('/events');
+        source.onmessage = (event) => {
+          try {
+            const payload = JSON.parse(event.data);
+            applyRows(payload.rows);
+          } catch (err) {
+            console.error('Parse error', err);
+          }
+        };
+        source.onerror = () => {
+          source.close();
+          setTimeout(startStream, 3000);
+        };
+      }
+
+      startStream();
+    </script>
   `;
 
-  res.send(html);
-});
+  return html;
+};
 
-// Start the server (bind on all interfaces for LAN access)
-app.listen(PORT, '0.0.0.0', () => {
-  console.log(`✅ Server running on port ${PORT}`);
-  console.log(`Open http://localhost:${PORT}/ or http://<LAN-IP>:${PORT}/ in your browser`);
-});
+const createApp = () => {
+  const app = express();
+  app.use(express.json());
+
+  app.post("/update", async (req, res, next) => {
+    const { id, distance } = req.body;
+    if (id && Object.prototype.hasOwnProperty.call(espData, id)) {
+      try {
+        const label = distance !== -1 ? `${distance} m` : "Not Found";
+        await writeStoreValue(id, label);
+        console.log(
+          `[${new Date().toISOString()}] from ${req.ip} -> [${id}] Distance: ${label}`
+        );
+        await broadcastStatus();
+        res.status(200).send("Data received");
+      } catch (err) {
+        next(err);
+      }
+    } else {
+      res.status(400).send("Invalid ID or data");
+    }
+  });
+
+  app.get("/", async (req, res, next) => {
+    try {
+      const html = await renderDashboard();
+      res.send(html);
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/status", async (req, res, next) => {
+    try {
+      const rows = await buildStatusRows();
+      res.json({ rows, updatedAt: Date.now() });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  app.get("/events", async (req, res, next) => {
+    try {
+    res.setHeader("Content-Type", "text/event-stream");
+    res.setHeader("Cache-Control", "no-cache");
+    res.setHeader("Connection", "keep-alive");
+    res.flushHeaders?.();
+
+    sseClients.add(res);
+      const rows = await buildStatusRows();
+      res.write(`data: ${JSON.stringify({ rows, updatedAt: Date.now() })}\n\n`);
+
+      req.on("close", () => {
+        sseClients.delete(res);
+      });
+    } catch (err) {
+      next(err);
+    }
+  });
+
+  return app;
+};
+
+const app = createApp();
+
+async function broadcastStatus() {
+  if (!sseClients.size) return;
+  const rows = await buildStatusRows();
+  const payload = `data: ${JSON.stringify({ rows, updatedAt: Date.now() })}\n\n`;
+  for (const client of sseClients) {
+    client.write(payload);
+  }
+}
+
+if (require.main === module) {
+  app.listen(PORT, "0.0.0.0", () => {
+    console.log(`✅ Server running on port ${PORT}`);
+    console.log(`Open http://localhost:${PORT}/ or http://<LAN-IP>:${PORT}/ in your browser`);
+  });
+}
+
+module.exports = app;
