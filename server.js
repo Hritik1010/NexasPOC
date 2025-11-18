@@ -1,11 +1,8 @@
 // server.js
 
 const express = require("express");
-const { kv } = require("@vercel/kv");
 
 const PORT = process.env.PORT || 80;
-const KV_KEY = process.env.KV_KEY || "esp32-distance";
-const useKV = Boolean(process.env.KV_REST_API_URL && process.env.KV_REST_API_TOKEN);
 
 const DEFAULT_ESP_DATA = {
   "ESP32-A": "No data",
@@ -52,18 +49,11 @@ const statusForDevice = (id, label, closest) => {
 };
 
 const readStoreSnapshot = async () => {
-  if (useKV) {
-    const remote = await kv.hgetall(KV_KEY);
-    return { ...DEFAULT_ESP_DATA, ...(remote || {}) };
-  }
   return { ...espData };
 };
 
 const writeStoreValue = async (id, value) => {
   espData[id] = value;
-  if (useKV) {
-    await kv.hset(KV_KEY, { [id]: value });
-  }
 };
 
 const buildStatusRows = async () => {

@@ -139,5 +139,5 @@ void loop() {
   }
 
   pBLEScan->clearResults();  // Free memory
-  delay(100);  // brief pause before rescanning
+  delay(250);  // brief pause before rescanning
 }
