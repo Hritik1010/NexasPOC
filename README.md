@@ -36,6 +36,30 @@ render blueprint install
 
 Review `render.yaml` to adjust the service name, region, or plan before running the command. Render provisions everything with the same build/start commands described above.
 
+## Deploying to Cloudflare Workers
+
+Cloudflare Workers keep your API close to your ESP32 devices globally, and the new `cloudflare/worker.js` mirror of the Express server makes deployment straightforward.
+
+1. Install and authenticate the CLI:
+	```bash
+	npm install -g wrangler
+	wrangler login
+	```
+2. Create KV namespaces for production and preview:
+	```bash
+	wrangler kv:namespace create esp_data
+	wrangler kv:namespace create esp_data --preview
+	```
+   Copy the returned IDs into `wrangler.toml` under the `ESP_DATA` binding.
+3. Deploy the Worker:
+	```bash
+	wrangler deploy
+	```
+4. Once the deployment succeeds, open the Worker URL (e.g. `https://nexas-worker.your-account.workers.dev/`) to confirm the dashboard renders and data updates.
+5. Update each ESP32's `SERVER_URL` to the Worker endpoint plus `/update`, for example `https://nexas-worker.your-account.workers.dev/update`.
+
+> **SSE cadence:** Workers stream the `/events` endpoint by pulling the latest KV snapshot every 5 seconds. Updates may take up to one poll cycle to appear downstream.
+
 ## ESP32 configuration
 
 Edit `ESP32/ESPNEXAS.cpp` before flashing:
@@ -44,7 +68,7 @@ Edit `ESP32/ESPNEXAS.cpp` before flashing:
 #define DEVICE_ID "ESP32-A"        // B/C for other boards
 #define WIFI_SSID "YourNetwork"
 #define WIFI_PASSWORD "YourPassword"
-#define SERVER_URL "https://<your-service>.onrender.com/update"
+#define SERVER_URL "https://<your-service>.onrender.com/update" // or https://<your-worker>.workers.dev/update
 ```
 
 The sketch scans every ~1 second, calculates distance, and posts JSON `{ "id": "ESP32-A", "distance": 1.23 }`. When the beacon is not seen, `distance` becomes `-1` so the UI shows `-` for that location.

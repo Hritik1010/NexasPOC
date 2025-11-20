@@ -1,0 +1,11 @@
+name = "nexas-worker"
+main = "cloudflare/worker.js"
+compatibility_date = "2024-11-20"
+
+# Replace the placeholders below with the IDs returned by
+# `wrangler kv:namespace create esp_data` and
+# `wrangler kv:namespace create esp_data --preview`.
+[[kv_namespaces]]
+binding = "ESP_DATA"
+id = "<production-kv-id>"
+preview_id = "<preview-kv-id>"
