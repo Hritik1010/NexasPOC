@@ -11,9 +11,9 @@ const DEFAULT_ESP_DATA = {
 };
 
 const LOCATION_LABELS = {
-  "ESP32-A": "Shop 1",
-  "ESP32-B": "Shop 2",
-  "ESP32-C": "Shop 3",
+  "ESP32-A": "Shop A",
+  "ESP32-B": "Shop B",
+  "ESP32-C": "Shop C",
 };
 
 const espData = { ...DEFAULT_ESP_DATA };
