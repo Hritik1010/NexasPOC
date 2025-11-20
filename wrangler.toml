@@ -7,5 +7,5 @@ compatibility_date = "2024-11-20"
 # `wrangler kv:namespace create esp_data --preview`.
 [[kv_namespaces]]
 binding = "ESP_DATA"
-id = "<production-kv-id>"
-preview_id = "<preview-kv-id>"
+id = "772a9a79f6af47e4bf88b6af0262479a"
+preview_id = "5d180e6b37e64db89637855cfcc48754"
